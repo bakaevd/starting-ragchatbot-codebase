@@ -20,6 +20,23 @@ uv sync
 
 **Important**: Always use `uv` for dependency management - do not use `pip` directly. All Python commands should be run through `uv run`.
 
+**Code Quality:**
+```bash
+# Format code automatically (recommended before committing)
+./scripts/format-code.sh        # Unix/Mac
+scripts\format-code.bat         # Windows
+
+# Run all quality checks
+./scripts/quality-check.sh      # Unix/Mac  
+scripts\quality-check.bat       # Windows
+
+# Individual quality checks
+uv run black --check backend/ main.py    # Check formatting
+uv run black backend/ main.py            # Auto-format code
+uv run isort backend/ main.py            # Sort imports
+uv run flake8 backend/ main.py           # Run linting
+```
+
 **Access points:**
 - Web interface: http://localhost:8000
 - API docs: http://localhost:8000/docs
