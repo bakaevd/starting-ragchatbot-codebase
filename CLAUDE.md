@@ -18,6 +18,12 @@ cd backend && uv run uvicorn app:app --reload --port 8000
 uv sync
 ```
 
+**Run individual Python files:**
+```bash
+uv run python backend/document_processor.py
+uv run python main.py
+```
+
 **Important**: Always use `uv` for dependency management - do not use `pip` directly. All Python commands should be run through `uv run`.
 
 **Code Quality:**
@@ -41,6 +47,10 @@ uv run flake8 backend/ main.py           # Run linting
 - Web interface: http://localhost:8000
 - API docs: http://localhost:8000/docs
 
+**Testing/Development:**
+- Course documents go in `/docs` folder (auto-loaded on startup)
+- Environment variables in `.env` file (requires `ANTHROPIC_API_KEY`)
+
 ## Architecture Overview
 
 This is a **Retrieval-Augmented Generation (RAG) system** built as a full-stack web application for querying course materials using AI. The architecture follows a modular design with clear separation of concerns:
@@ -55,40 +65,46 @@ The system implements a **tool-enhanced RAG pipeline**:
 
 ### Key Architectural Components
 
-**RAG System (`rag_system.py`)** - Central orchestrator that coordinates all components. This is the main entry point for query processing and manages the flow between AI generation, tool execution, and session handling.
+**RAG System (`rag_system.py`)** - Central orchestrator that coordinates all components. Entry point for query processing. Manages flow between AI generation, tool execution, and session handling. Key method: `query()` processes user questions through the two-phase AI interaction.
 
-**AI Generator (`ai_generator.py`)** - Handles two-phase Claude API interaction:
-- Phase 1: Initial call with available tools 
-- Phase 2: Follow-up call with tool results (if tools were used)
+**AI Generator (`ai_generator.py`)** - Handles two-phase Claude API interaction with performance optimizations:
+- Phase 1: Initial call with available tools (`generate_response()`)
+- Phase 2: Follow-up call with tool results if tools were used (`_handle_tool_execution()`)
+- Uses pre-built API parameters and static system prompts for efficiency
 - Implements tool execution detection and conversation context management
 
-**Tool System (`search_tools.py`)** - Modular tool architecture using abstract base classes:
-- `Tool` interface for extensible tool definitions
-- `CourseSearchTool` for semantic course content search
-- `ToolManager` for tool registration and execution coordination
+**Tool System (`search_tools.py`)** - Modular architecture using abstract base classes:
+- `Tool` interface for extensible tool definitions with `execute()` and `get_tool_definition()`
+- `CourseSearchTool` for semantic course content search with source tracking
+- `ToolManager` for tool registration, execution coordination, and source management
+- Sources are tracked per search and include lesson links for UI display
 
-**Vector Store (`vector_store.py`)** - ChromaDB integration with dual collections:
-- `course_catalog`: Course metadata for name resolution
-- `course_content`: Chunked course material for content search
-- Implements course name fuzzy matching and filtered search
+**Vector Store (`vector_store.py`)** - ChromaDB integration with dual collections and unified search interface:
+- `course_catalog`: Course metadata for fuzzy name resolution (uses sentence transformers)
+- `course_content`: Chunked course material for semantic content search
+- Main `search()` method handles course resolution, filtering, and content retrieval
+- Implements complex filtering logic (`$and` operations) for course + lesson combinations
 
 **Document Processor (`document_processor.py`)** - Structured text processing pipeline:
 - Expects specific document format with course metadata headers
 - Parses lessons using regex patterns (`Lesson N: Title`)
-- Implements sentence-boundary-aware chunking with configurable overlap
-- Adds contextual prefixes to chunks for better retrieval
+- Implements sentence-boundary-aware chunking (800 chars with 100 char overlap)
+- Adds contextual prefixes to chunks including course and lesson information
 
 ### Configuration System
 
 **Environment Setup Required:**
-- `.env` file with `ANTHROPIC_API_KEY`
-- Course documents in `/docs` folder (loaded automatically on startup)
+- `.env` file with `ANTHROPIC_API_KEY` (loaded from parent directory)
+- Course documents in `/docs` folder (auto-loaded on startup)
 
 **Key Configuration (`config.py`):**
+- `ANTHROPIC_MODEL`: "claude-sonnet-4-20250514" (latest Claude model)
+- `EMBEDDING_MODEL`: "all-MiniLM-L6-v2" (sentence transformers model)
 - `CHUNK_SIZE`: 800 characters (balance between context and precision)
 - `CHUNK_OVERLAP`: 100 characters (maintains context across chunks)
-- `MAX_RESULTS`: 5 (vector search limit)
-- `MAX_HISTORY`: 2 (conversation memory)
+- `MAX_RESULTS`: 5 (vector search result limit)
+- `MAX_HISTORY`: 2 (conversation memory limit)
+- `CHROMA_PATH`: "./chroma_db" (persistent vector database location)
 
 ### Expected Document Format
 
@@ -108,25 +124,48 @@ Lesson 1: [Next lesson title]
 
 ### Session Management
 
-The system maintains conversation context through `SessionManager`:
-- Tracks conversation history per session
-- Enables contextual follow-up questions
-- Session IDs persist across frontend interactions
+The system maintains conversation context through `SessionManager` (`session_manager.py`):
+- Tracks conversation history per session with configurable limits
+- Enables contextual follow-up questions within the same session
+- Session IDs auto-generated if not provided and persist across frontend interactions
+- Memory management prevents context overflow
+
+### FastAPI Backend (`app.py`)
+
+The web API provides RESTful endpoints:
+- `POST /api/query`: Main query endpoint accepting `{query, session_id?}`
+- `GET /api/courses`: Returns course statistics and titles
+- Static file serving for frontend at root path
+- CORS middleware configured for development
+- Auto-loads course documents from `/docs` on startup
+- Request/response models defined with Pydantic for type safety
 
 ### Frontend Integration
 
-- Pure HTML/CSS/JS frontend served as static files
-- Real-time chat interface with markdown rendering
-- Source citation display in collapsible UI elements
+- Pure HTML/CSS/JS frontend (`frontend/`) served as static files
+- Real-time chat interface with markdown rendering (`marked.js`)
+- Source citation display in collapsible UI elements with lesson links
+- Session persistence and loading states
 - Automatic course statistics loading from `/api/courses` endpoint
+- No build process - direct file serving
 
 ## Important Implementation Notes
 
-- **Tool Usage Philosophy**: Claude decides tool usage - no forced search on every query
-- **Two-Phase AI Calls**: Tool-based queries require two separate Claude API calls  
-- **Context Enhancement**: Chunks include course/lesson context for better retrieval accuracy
-- **Source Tracking**: Tool manager tracks and provides source citations for responses
-- **Error Handling**: Graceful fallbacks for missing courses, failed searches, API errors
-- always use uv to run the server do not use pip directly
-- use uv to run Python files
-- make sure to use uv to manage all dependencies
+- **Tool Usage Philosophy**: Claude autonomously decides when to use search tools - no forced search on every query
+- **Two-Phase AI Architecture**: Tool-based queries require two separate Claude API calls for optimal results
+- **Performance Optimizations**: Pre-built API parameters, static system prompts, and efficient string operations
+- **Context Enhancement**: Chunks include course/lesson prefixes for better retrieval accuracy
+- **Source Tracking**: Tool manager tracks sources with lesson links; sources reset after each query  
+- **Error Handling**: Graceful fallbacks for missing courses, failed searches, and API errors
+- **Memory Management**: Session history limited to prevent context overflow
+- **Database Persistence**: ChromaDB data persists across restarts in `./chroma_db`
+- **Dual Collection Strategy**: Separate collections for course metadata (name resolution) and content (search)
+
+## Development Notes
+
+- Always use `uv` for dependency management - never use `pip` directly
+- All Python commands must be run through `uv run`
+- Course documents auto-load from `/docs` on startup (no manual indexing required)
+- Environment variables loaded from `.env` in parent directory
+- Vector embeddings use sentence-transformers with "all-MiniLM-L6-v2" model
+- Search supports partial course name matching and lesson number filtering

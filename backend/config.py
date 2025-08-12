@@ -3,8 +3,8 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file in parent directory
+load_dotenv("../.env")
 
 
 @dataclass

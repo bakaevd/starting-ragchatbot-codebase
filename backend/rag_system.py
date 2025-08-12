@@ -4,10 +4,9 @@ from typing import Dict, List, Optional, Tuple
 from ai_generator import AIGenerator
 from document_processor import DocumentProcessor
 from models import Course, CourseChunk, Lesson
-from search_tools import CourseSearchTool, ToolManager
+from search_tools import CourseSearchTool, ToolManager, CourseOutlineTool
 from session_manager import SessionManager
 from vector_store import VectorStore
-
 
 class RAGSystem:
     """Main orchestrator for the Retrieval-Augmented Generation system"""
@@ -30,8 +29,9 @@ class RAGSystem:
         # Initialize search tools
         self.tool_manager = ToolManager()
         self.search_tool = CourseSearchTool(self.vector_store)
+        self.outline_tool = CourseOutlineTool(self.vector_store)
         self.tool_manager.register_tool(self.search_tool)
-
+        self.tool_manager.register_tool(self.outline_tool)
     def add_course_document(self, file_path: str) -> Tuple[Course, int]:
         """
         Add a single course document to the knowledge base.
